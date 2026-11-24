@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Escáner de códigos</title>
+<style>
+:root{color-scheme:light dark;--bg:#f5f6f8;--fg:#1d1f23;--card:#ffffff;--accent:#1f6feb;--ok:#1a7f37;--err:#cf222e;--muted:#6b7280;--border:#c9ced6}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0f1115;--fg:#e6e8eb;--card:#181b21;--muted:#9aa3ad;--border:#3a404a}}
+:root[data-theme="dark"]{--bg:#0f1115;--fg:#e6e8eb;--card:#181b21;--muted:#9aa3ad;--border:#3a404a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:16px;max-width:520px;margin-inline:auto}
+h1{font-size:20px;margin:4px 0 12px}
+.card{background:var(--card);border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+video{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:10px;background:#000}
+label{display:block;font-size:14px;color:var(--muted);margin:10px 0 4px}
+input,select,textarea,button{font:inherit;width:100%;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--fg)}
+textarea{min-height:70px;resize:vertical}
+button{background:var(--accent);color:#fff;border:none;font-weight:600;margin-top:12px;cursor:pointer}
+button.sec{background:transparent;color:var(--accent);border:1px solid var(--accent)}
+button:disabled{opacity:.6}
+#msg{margin-top:10px;font-size:15px;min-height:20px}
+.ok{color:var(--ok)} .err{color:var(--err)}
+.hint{font-size:13px;color:var(--muted);margin:8px 0 0}
+</style>
+</head>
+<body>
+<h1>Escáner de códigos</h1>
+
+<div class="card">
+  <video id="cam" playsinline muted autoplay></video>
+  <button id="btnCam" type="button" class="sec">Iniciar cámara</button>
+  <p id="camMsg" class="hint">Apunta al código EAN-13 o Code 128.</p>
+</div>
+
+<form id="form" class="card" autocomplete="off">
+  <label for="tipo">Tipo</label>
+  <select id="tipo" required>
+    <option value="Bodega">Bodega</option>
+    <option value="Medidor">Medidor</option>
+  </select>
+
+  <label for="codigo">Código</label>
+  <input id="codigo" required placeholder="Escanea o escribe el código">
+
+  <label for="formato">Formato</label>
+  <select id="formato">
+    <option value="EAN-13">EAN-13</option>
+    <option value="Code 128">Code 128</option>
+    <option value="Manual">Manual</option>
+  </select>
+
+  <label for="cantidad">Cantidad / lectura</label>
+  <input id="cantidad" type="number" step="any" inputmode="decimal" required>
+
+  <label for="usuario">Usuario</label>
+  <input id="usuario" required>
+
+  <label for="notas">Notas</label>
+  <textarea id="notas"></textarea>
+
+  <button id="btnSave" type="submit">Guardar</button>
+  <div id="msg" role="status"></div>
+</form>
+
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script>
+const ENDPOINT = 'https://script.google.com/macros/s/AKfycbzkaZkgBbnMcpdPb-pCA07kpVqMDGVSFk27UCFvd40Ti4o4oiieIFgeLo12HiwiRhU/exec';
+const TOKEN = 'ILUM-ESC-7kQ2-wX9p-Rv4Lz8-mT3n';
+const HOJA = 'Escaneos';
+
+const $ = id => document.getElementById(id);
+const cam = $('cam'), btnCam = $('btnCam'), camMsg = $('camMsg');
+const form = $('form'), btnSave = $('btnSave'), msg = $('msg');
+
+let reader = null, controls = null;
+
+function formatoLegible(result) {
+  const f = result.getBarcodeFormat();
+  if (f === ZXing.BarcodeFormat.EAN_13) return 'EAN-13';
+  if (f === ZXing.BarcodeFormat.CODE_128) return 'Code 128';
+  return 'Manual';
+}
+
+function onScan(result) {
+  $('codigo').value = result.getText();
+  $('formato').value = formatoLegible(result);
+  camMsg.textContent = 'Código leído. Revisa y guarda.';
+  stopCam();
+  $('cantidad').focus();
+}
+
+async function startCam() {
+  if (!window.ZXing) {
+    camMsg.textContent = 'No se cargó el lector de códigos (revisa la conexión). Escribe el código a mano.';
+    return;
+  }
+  try {
+    const hints = new Map();
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.CODE_128]);
+    reader = new ZXing.BrowserMultiFormatReader(hints);
+    controls = await reader.decodeFromConstraints(
+      { video: { facingMode: { ideal: 'environment' } } },
+      cam,
+      (result) => { if (result) onScan(result); }
+    );
+    btnCam.textContent = 'Detener cámara';
+    camMsg.textContent = 'Cámara activa. Apunta al código.';
+  } catch (e) {
+    camMsg.textContent = 'No se pudo abrir la cámara: ' + e.message + '. Usa HTTPS y permite el acceso.';
+    stopCam();
+  }
+}
+
+function stopCam() {
+  try { if (controls) controls.stop(); } catch (e) {}
+  controls = null;
+  reader = null;
+  if (cam.srcObject) { cam.srcObject.getTracks().forEach(t => t.stop()); cam.srcObject = null; }
+  btnCam.textContent = 'Iniciar cámara';
+}
+
+btnCam.addEventListener('click', () => {
+  if (controls) stopCam(); else startCam();
+});
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  btnSave.disabled = true;
+  msg.className = '';
+  msg.textContent = 'Guardando…';
+  const payload = {
+    token: TOKEN,
+    hoja: HOJA,
+    fecha: new Date().toISOString(),
+    tipo: $('tipo').value,
+    codigo: $('codigo').value.trim(),
+    formato: $('formato').value,
+    cantidad: $('cantidad').value,
+    usuario: $('usuario').value.trim(),
+    notas: $('notas').value.trim()
+  };
+  try {
+    const r = await fetch(ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload)
+    });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'respuesta no válida');
+    msg.className = 'ok';
+    msg.textContent = 'Guardado (fila ' + j.fila + ').';
+    $('codigo').value = '';
+    $('cantidad').value = '';
+    $('notas').value = '';
+    $('formato').value = 'EAN-13';
+  } catch (err) {
+    msg.className = 'err';
+    msg.textContent = 'No se guardó: ' + err.message;
+  } finally {
+    btnSave.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
